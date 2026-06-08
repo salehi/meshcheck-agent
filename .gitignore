@@ -1,0 +1,14 @@
+# Build artifacts
+/dist/
+
+# Offline agent-release signing key (private half). Only the public half
+# (deploy/release-pubkey.b64) is committed; the private key never is.
+/release.key
+
+# Go — vendor/ is committed so builds are offline and reproducible.
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/

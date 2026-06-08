@@ -1,0 +1,36 @@
+# Code-generation stack for the agent protocol.
+#
+# This is a standalone Compose file, separate from the root compose.yaml — it
+# is a build-time tool, not part of the running platform. It regenerates the
+# Go message structs from agent.proto without Go or protoc on the host.
+#
+# Run from the agent repository root:
+#
+#   docker-compose -f proto/compose.yaml run --rm codegen
+#
+# The generated file lands at pkg/agentpb/agent.pb.go and is committed.
+
+services:
+  codegen:
+    build:
+      context: .
+      dockerfile: codegen.Dockerfile
+    working_dir: /work
+    # GOSUMDB is disabled because the build network cannot reach
+    # sum.golang.org (same constraint as the main deploy/Dockerfile).
+    environment:
+      GOSUMDB: "off"
+    # The agent repository is mounted so protoc can write the generated file
+    # back into pkg/agentpb/.
+    volumes:
+      - ..:/work
+    # Install the Go protobuf plugin, then generate message structs only —
+    # no gRPC service stubs.
+    # `--go_opt=module=...` strips the module prefix from the proto's
+    # go_package, so output lands at pkg/agentpb/agent.pb.go.
+    command:
+      - sh
+      - -c
+      - >-
+        go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2 &&
+        protoc -I proto --go_out=. --go_opt=module=github.com/salehi/meshcheck-agent proto/agent.proto
