@@ -55,6 +55,10 @@ vendor: ## Refresh vendor/ from go.mod (run after adding/upgrading a dependency)
 # that refuses to self-update.
 AGENT_VERSION      ?= $(shell cat VERSION 2>/dev/null)
 RELEASE_PUBKEY_B64 ?= $(shell cat deploy/release-pubkey.b64 2>/dev/null)
+# The immutable image tag published next to the rolling `:agent` tag. Defaults
+# to agent-<version> for local publishes; the release-by-tag GitHub workflow
+# overrides it with the pushed git tag so the published tag matches it verbatim.
+RELEASE_TAG        ?= agent-$(AGENT_VERSION)
 
 .PHONY: build
 build: ## Cross-compile the agent (amd64+arm64+armv7) into dist/ (offline, from vendor/)
@@ -95,11 +99,11 @@ buildx-init: ## Create the multi-arch buildx builder (idempotent)
 
 .PHONY: publish
 publish: build buildx-init ## Build+push the multi-arch agent image to Docker Hub
-	@echo "==> publishing $(AGENT_REPO):agent ($(PLATFORMS)) v$(AGENT_VERSION)"
+	@echo "==> publishing $(AGENT_REPO):agent + :$(RELEASE_TAG) ($(PLATFORMS)) v$(AGENT_VERSION)"
 	docker buildx build --platform $(PLATFORMS) \
 	  -f deploy/publish-agent.Dockerfile \
 	  -t $(AGENT_REPO):agent \
-	  -t $(AGENT_REPO):agent-$(AGENT_VERSION) \
+	  -t $(AGENT_REPO):$(RELEASE_TAG) \
 	  --push .
 
 # --- codegen / test ------------------------------------------------------

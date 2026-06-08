@@ -1,10 +1,19 @@
 # Publish the multi-arch MeshCheck Node agent image to Docker Hub.
 #
-# This mirrors `make publish`: it cross-compiles the agent for amd64 + arm64 +
-# armv7 (offline, from the committed vendor/ tree), assembles one multi-arch
-# manifest list, and pushes it to Docker Hub under the rolling `:agent` tag and
-# the version-pinned `:agent-<VERSION>` tag (from the VERSION file). The target
-# repository is AGENT_REPO in the Makefile (s4l3h1/meshcheck).
+# Runs ONLY when a release tag is pushed. The git tag is the release version:
+# the binary is stamped with it (leading `v` stripped) and the image is
+# published under a tag equal to the git tag verbatim, alongside the rolling
+# `:agent` tag that the install docs and the platform's `docker run` command
+# point at.
+#
+#   git tag v0.3.0 && git push origin v0.3.0
+#     -> s4l3h1/meshcheck:agent     (rolling — latest released agent)
+#     -> s4l3h1/meshcheck:v0.3.0    (immutable — equals the git tag)
+#     binary --version: 0.3.0
+#
+# Mirrors `make publish`: cross-compiles amd64 + arm64 + armv7 offline from the
+# committed vendor/ tree, then assembles and pushes one multi-arch manifest.
+# The target repository is AGENT_REPO in the Makefile (s4l3h1/meshcheck).
 #
 # Required repository secrets (Settings > Secrets and variables > Actions):
 #   DOCKERHUB_USERNAME  Docker Hub account that owns the target repo (s4l3h1)
@@ -12,13 +21,14 @@
 name: Publish agent image
 
 on:
-  # Every merge to main refreshes the published images.
   push:
-    branches: [main]
-  # Allow a manual re-publish from the Actions tab.
-  workflow_dispatch:
+    tags:
+      # Release tags only, with or without a leading `v` (e.g. v0.3.0 / 0.3.0).
+      - 'v[0-9]*'
+      - '[0-9]*'
 
-# Never run two publishes concurrently; don't interrupt a push already in flight.
+# Serialize publishes so concurrent releases can't race on the rolling `:agent`
+# tag; let each one finish rather than cancelling a push already in flight.
 concurrency:
   group: publish-agent-image
   cancel-in-progress: false
@@ -45,10 +55,12 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Cross-compile (offline, from vendor/) and push the multi-arch image.
-      # BUILDX_BUILDER points `make build`'s plain `docker build` at the
-      # docker-container builder above (replaces the deprecated install: true).
+      # Cross-compile (offline, from vendor/) and push. The git tag drives both
+      # the stamped version (leading `v` stripped) and the immutable image tag;
+      # the rolling `:agent` tag is refreshed too. BUILDX_BUILDER points
+      # `make build`'s plain `docker build` at the docker-container builder above.
       - name: Build and publish the agent image
         env:
           BUILDX_BUILDER: ${{ steps.buildx.outputs.name }}
-        run: make publish
+          GIT_TAG: ${{ github.ref_name }}
+        run: make publish AGENT_VERSION="${GIT_TAG#v}" RELEASE_TAG="${GIT_TAG}"
