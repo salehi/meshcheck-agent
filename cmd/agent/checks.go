@@ -446,10 +446,11 @@ func runDNS(ctx context.Context, target string, params []byte) (agentpb.ResultOu
 	defer cancel()
 
 	start := time.Now()
-	records, err := resolveDNS(lookupCtx, p.RecordType, target)
+	var nameserver string
+	records, err := resolveDNS(lookupCtx, p.RecordType, target, &nameserver)
 	latency := time.Since(start)
 
-	m := checkspec.DNSMeasurements{RecordType: p.RecordType, LatencyMs: msOf(latency)}
+	m := checkspec.DNSMeasurements{RecordType: p.RecordType, LatencyMs: msOf(latency), Nameserver: nameserver}
 	if err != nil {
 		// A timeout is distinct from an outright resolution failure
 		// (NXDOMAIN, an empty record set) so the Verdict can tell them apart.
@@ -466,9 +467,23 @@ func runDNS(ctx context.Context, target string, params []byte) (agentpb.ResultOu
 
 // resolveDNS performs the lookup for one record type and renders the records
 // as strings. An empty record set is reported as an error so it fails rather
-// than passing with nothing found.
-func resolveDNS(ctx context.Context, recordType, host string) ([]string, error) {
-	var r net.Resolver
+// than passing with nothing found. It records the resolver endpoint it actually
+// dialed into *nameserver (e.g. "127.0.0.11:53").
+//
+// PreferGo forces Go's pure-Go resolver so the Dial hook fires reliably — with
+// the cgo resolver the hook is bypassed and the nameserver would go uncaptured.
+func resolveDNS(ctx context.Context, recordType, host string, nameserver *string) ([]string, error) {
+	dialer := &net.Dialer{}
+	r := net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			conn, err := dialer.DialContext(ctx, network, address)
+			if err == nil && nameserver != nil {
+				*nameserver = address
+			}
+			return conn, err
+		},
+	}
 	switch recordType {
 	case "A", "AAAA":
 		network := "ip4"

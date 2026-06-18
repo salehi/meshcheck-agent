@@ -133,6 +133,10 @@ type DNSMeasurements struct {
 	RecordCount int      `json:"record_count"`
 	Records     []string `json:"records"`
 	LatencyMs   float64  `json:"latency_ms"`
+	// Nameserver is the resolver endpoint the Node actually queried, e.g.
+	// "127.0.0.11:53" — captured from the Node's own resolver configuration.
+	// Empty for results produced before nameserver capture was added.
+	Nameserver string `json:"nameserver,omitempty"`
 }
 
 // TLSMeasurements is the result payload of a tls Check. The certificate
