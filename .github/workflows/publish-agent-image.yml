@@ -2,13 +2,14 @@
 #
 # Runs ONLY when a release tag is pushed. The git tag is the release version:
 # the binary is stamped with it (leading `v` stripped) and the image is
-# published under a tag equal to the git tag verbatim, alongside the rolling
-# `:agent` tag that the install docs and the platform's `docker run` command
-# point at.
+# published under the same `agent-<version>` tag that `make publish` uses,
+# alongside the rolling `:agent` tag that the install docs and the platform's
+# `docker run` command point at. This mirrors `make publish` exactly — the
+# workflow only supplies AGENT_VERSION and lets the Makefile derive the tag.
 #
 #   git tag v0.3.0 && git push origin v0.3.0
-#     -> s4l3h1/meshcheck:agent     (rolling — latest released agent)
-#     -> s4l3h1/meshcheck:v0.3.0    (immutable — equals the git tag)
+#     -> s4l3h1/meshcheck:agent        (rolling — latest released agent)
+#     -> s4l3h1/meshcheck:agent-0.3.0  (immutable — `agent-` + version)
 #     binary --version: 0.3.0
 #
 # Mirrors `make publish`: cross-compiles amd64 + arm64 + armv7 offline from the
@@ -55,12 +56,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Cross-compile (offline, from vendor/) and push. The git tag drives both
-      # the stamped version (leading `v` stripped) and the immutable image tag;
-      # the rolling `:agent` tag is refreshed too. BUILDX_BUILDER points
+      # Cross-compile (offline, from vendor/) and push. The git tag drives the
+      # stamped version (leading `v` stripped); the Makefile then derives the
+      # immutable image tag as agent-<version>, same as a local `make publish`.
+      # The rolling `:agent` tag is refreshed too. BUILDX_BUILDER points
       # `make build`'s plain `docker build` at the docker-container builder above.
       - name: Build and publish the agent image
         env:
           BUILDX_BUILDER: ${{ steps.buildx.outputs.name }}
           GIT_TAG: ${{ github.ref_name }}
-        run: make publish AGENT_VERSION="${GIT_TAG#v}" RELEASE_TAG="${GIT_TAG}"
+        run: make publish AGENT_VERSION="${GIT_TAG#v}"
