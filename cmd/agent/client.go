@@ -66,6 +66,10 @@ type Client struct {
 	updateMu         sync.Mutex
 	updateActive     bool
 	attemptedVersion string
+
+	// assign runs the standing assignments the platform gives this Node
+	// (assign.go). It outlives any one connection.
+	assign *assigner
 }
 
 // newClient builds a Client and probes which check types it can run.
@@ -76,7 +80,9 @@ func newClient(cfg Config, priv ed25519.PrivateKey, log *slog.Logger) *Client {
 	} else {
 		log.Warn("ICMP unavailable; this agent will not advertise the ping capability")
 	}
-	return &Client{cfg: cfg, priv: priv, log: log, checkTypes: types}
+	c := &Client{cfg: cfg, priv: priv, log: log, checkTypes: types}
+	c.assign = newAssigner(c)
+	return c
 }
 
 // Run connects once and serves the connection until it ends. It returns
@@ -117,6 +123,11 @@ func (c *Client) Run(ctx context.Context) (connected bool, reconnectDelay time.D
 	defer stop()
 	go c.writeLoop(runCtx)
 	go c.heartbeatLoop(runCtx, heartbeat)
+	// Assignments keep running across reconnects (they live on ctx, not
+	// runCtx); results the last connection never acknowledged go out again.
+	c.assign.start(ctx)
+	c.assign.reconnected()
+	go c.assign.flushLoop(runCtx)
 
 	c.log.Info("connected", "heartbeat_seconds", heartbeat/time.Second,
 		"max_inflight", inflight, "platform_limit", maxInflight)
@@ -134,6 +145,7 @@ func (c *Client) handshake(ctx context.Context) (heartbeat time.Duration, maxInf
 		return 0, 0, err
 	}
 	hello := env.GetServerHello()
+	c.assign.setOffset(env.GetSentAt(), time.Now().UnixMilli())
 	if hello == nil {
 		return 0, 0, errors.New("first message was not a ServerHello")
 	}
@@ -173,7 +185,9 @@ func (c *Client) clientHello() *agentpb.Envelope {
 				City:        c.cfg.City,
 			},
 		},
-		Ed25519Pubkey: c.priv.Public().(ed25519.PublicKey),
+		Ed25519Pubkey:        c.priv.Public().(ed25519.PublicKey),
+		SupportsAssignments:  true,
+		ProbeBudgetPerMinute: int32(c.cfg.ProbeBudgetPerMinute),
 	})
 }
 
@@ -202,6 +216,10 @@ func (c *Client) readLoop(ctx context.Context) time.Duration {
 			return 5 * time.Second
 		case *agentpb.Envelope_FlowControl:
 			c.log.Info("flow control", "max_inflight", body.FlowControl.GetMaxInflightTasks())
+		case *agentpb.Envelope_AssignmentSet:
+			c.assign.apply(body.AssignmentSet)
+		case *agentpb.Envelope_SlotResultBatchAck:
+			c.assign.acked(body.SlotResultBatchAck)
 		case *agentpb.Envelope_ResultAck:
 			c.log.Debug("result acknowledged",
 				"task_id", body.ResultAck.GetTaskId(), "persisted", body.ResultAck.GetPersisted())
@@ -311,6 +329,8 @@ func wrap(body any) *agentpb.Envelope {
 		env.Body = &agentpb.Envelope_Heartbeat{Heartbeat: m}
 	case *agentpb.TaskAck:
 		env.Body = &agentpb.Envelope_TaskAck{TaskAck: m}
+	case *agentpb.SlotResultBatch:
+		env.Body = &agentpb.Envelope_SlotResultBatch{SlotResultBatch: m}
 	case *agentpb.ResultSubmit:
 		env.Body = &agentpb.Envelope_Result{Result: m}
 	default:

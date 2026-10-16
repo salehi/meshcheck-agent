@@ -60,3 +60,41 @@ func Verify(pub ed25519.PublicKey, r *agentpb.ResultSubmit) bool {
 	}
 	return ed25519.Verify(pub, Hash(r), r.GetSignature())
 }
+
+// slotDomain prefixes a SlotResult's canonical form, so a slot signature can
+// never be replayed as a ResultSubmit signature or the other way round.
+const slotDomain = "meshcheck-slot-result-v1\x00"
+
+// SlotHash returns the SHA-256 of a SlotResult's canonical form:
+//
+//	"meshcheck-slot-result-v1\0" || assignment_id || 0x00 || slot(int64 BE) ||
+//	outcome(uint32 BE) || measurements || started_at(int64 BE) || completed_at(int64 BE)
+//
+// The 0x00 after the assignment ID keeps an ID from running into the slot.
+func SlotHash(r *agentpb.SlotResult) []byte {
+	var b bytes.Buffer
+	b.WriteString(slotDomain)
+	b.WriteString(r.GetAssignmentId())
+	b.WriteByte(0)
+	_ = binary.Write(&b, binary.BigEndian, r.GetSlot())
+	_ = binary.Write(&b, binary.BigEndian, uint32(r.GetOutcome()))
+	b.Write(r.GetMeasurements())
+	_ = binary.Write(&b, binary.BigEndian, r.GetStartedAt())
+	_ = binary.Write(&b, binary.BigEndian, r.GetCompletedAt())
+	sum := sha256.Sum256(b.Bytes())
+	return sum[:]
+}
+
+// SignSlot produces the signature placed in SlotResult.signature.
+func SignSlot(priv ed25519.PrivateKey, r *agentpb.SlotResult) []byte {
+	return ed25519.Sign(priv, SlotHash(r))
+}
+
+// VerifySlot reports whether r.signature is a valid signature by pub over r's
+// canonical slot hash.
+func VerifySlot(pub ed25519.PublicKey, r *agentpb.SlotResult) bool {
+	if len(pub) != ed25519.PublicKeySize {
+		return false
+	}
+	return ed25519.Verify(pub, SlotHash(r), r.GetSignature())
+}

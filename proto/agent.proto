@@ -43,6 +43,10 @@ message Envelope {
     Shutdown shutdown = 41;
     Error error = 42;
     UpdateAvailable update_available = 43;
+
+    AssignmentSet assignment_set = 50;
+    SlotResultBatch slot_result_batch = 51;
+    SlotResultBatchAck slot_result_batch_ack = 52;
   }
 }
 
@@ -63,6 +67,12 @@ message ClientHello {
   bytes ed25519_pubkey = 4; // the Node's Result-signing public key; registered
                             // by the platform on the first connection and
                             // immutable thereafter (see agent-protocol.md)
+  // The agent runs standing assignments on its own clock (AssignmentSet in,
+  // SlotResultBatch out). An agent that leaves it false only ever gets Tasks.
+  bool supports_assignments = 5;
+  // How many assignment probes per minute the agent will run. The platform
+  // never assigns more. Zero means the platform's default.
+  int32 probe_budget_per_minute = 6;
 }
 
 message Heartbeat {
@@ -184,6 +194,67 @@ message Error {
   string code = 1;
   string message = 2;
   string correlation_id = 3; // optional; ties to a specific message_id
+}
+
+// === Standing assignments ===
+//
+// Instead of one Task per run, the platform can give a Node standing
+// assignments: "run this check every interval, at this phase". The Node runs
+// them on its own clock and streams signed results back in batches; the
+// platform sends a new AssignmentSet only when something changes. See
+// doc/protocols/agent-protocol.md §Standing assignments.
+//
+// Time is divided into slots per assignment. Slot k starts at
+//   k * interval_seconds * 1000 + phase_ms        (unix milliseconds)
+// on the platform's clock. The agent measures its offset from the platform's
+// clock from ServerHello's Envelope.sent_at and fires each slot at its start;
+// a result carries its slot index, so the platform groups results by slot
+// without trusting the Node's wall clock.
+
+// AssignmentSet replaces (full) or amends the Node's assignments. Sets are
+// applied in the order they arrive on the connection; a new connection always
+// starts with a full set.
+message AssignmentSet {
+  int64 version = 1;             // increases with every set sent to this Node
+  bool full = 2;                 // drop every assignment not in upserts
+  repeated Assignment upserts = 3;
+  repeated string removes = 4;   // assignment_ids to stop
+}
+
+message Assignment {
+  string assignment_id = 1;      // the Monitor ID
+  string check_type = 2;         // "ping", "tcp", ...
+  string target = 3;
+  bytes parameters = 4;          // JSON, as TaskAssignment.parameters
+  int32 interval_seconds = 5;
+  int32 phase_ms = 6;            // slot 0 starts this far into the interval
+  int32 timeout_ms = 7;          // a probe still running then is cut short
+}
+
+// SlotResult is one probe of one slot, signed like ResultSubmit but over its
+// own canonical form (assignment_id, slot, then fields 3-6).
+message SlotResult {
+  string assignment_id = 1;
+  int64 slot = 2;
+  ResultOutcome outcome = 3;
+  bytes measurements = 4;        // JSON, as ResultSubmit.measurements
+  int64 started_at = 5;          // unix milliseconds, Node clock
+  int64 completed_at = 6;
+  bytes signature = 7;
+}
+
+message SlotResultBatch {
+  string batch_id = 1;           // ULID; echoed in the ack
+  repeated SlotResult results = 2;
+}
+
+// SlotResultBatchAck tells the agent the platform has taken the batch; the
+// agent drops it. Results the platform refused (unknown assignment, bad
+// signature, stale slot) are counted, not retried.
+message SlotResultBatchAck {
+  string batch_id = 1;
+  int32 accepted = 2;
+  int32 refused = 3;
 }
 
 // === Agent self-update ===

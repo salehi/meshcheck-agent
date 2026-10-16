@@ -120,6 +120,13 @@ test: ## Run the Go unit tests in a container (offline, from vendor/)
 	  -e GOFLAGS='-mod=vendor -buildvcs=false' -e GOSUMDB=off \
 	  $(GO_IMAGE) go test ./...
 
+.PHONY: vet
+vet: ## Type-check and vet every package — catches compile errors in packages without tests
+	@echo "==> go vet ./... (in $(GO_IMAGE))"
+	docker run --rm -v "$(CURDIR)":/src -v $(MOD_CACHE):/go/pkg/mod -w /src \
+	  -e GOFLAGS='-mod=vendor -buildvcs=false' -e GOSUMDB=off \
+	  $(GO_IMAGE) go vet ./...
+
 .PHONY: clean
 clean: ## Remove build artifacts (dist/)
 	rm -rf dist/

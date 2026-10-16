@@ -71,6 +71,7 @@ The config file holds the API key and must not be group/world-readable.
 | `connection_class` | `MESHCHECK_AGENT_CONNECTION_CLASS` | `vps` \| `residential_wired` \| `residential_wireless` \| `office` \| `mobile` |
 | `log_level` | `MESHCHECK_AGENT_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` |
 | `max_concurrent_tasks` | `MESHCHECK_AGENT_MAX_CONCURRENT_TASKS` | agent-side task ceiling |
+| `probe_budget_per_minute` | `MESHCHECK_AGENT_PROBE_BUDGET_PER_MINUTE` | standing-assignment probes a minute the platform may give this node (default 600) |
 | `auto_update` | `MESHCHECK_AGENT_AUTO_UPDATE` | replace own binary on a signed release (default off) |
 
 The signing key (`key_file`) is generated on first run and **must stay stable**:

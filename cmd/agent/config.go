@@ -21,6 +21,11 @@ const defaultConfigPath = "/etc/meshcheck/agent.json"
 // limit, so a modest home machine never overcommits.
 const defaultMaxConcurrentTasks = 3
 
+// defaultProbeBudgetPerMinute is how many standing-assignment probes a minute
+// the agent offers the platform, which never assigns more. Ten a second is
+// light for any VPS; a contributor on a small line can lower it.
+const defaultProbeBudgetPerMinute = 600
+
 // Config is the agent's runtime configuration.
 type Config struct {
 	APIKey             string
@@ -32,6 +37,9 @@ type Config struct {
 	ConnectionClass    string
 	LogLevel           string
 	MaxConcurrentTasks int
+	// ProbeBudgetPerMinute caps standing-assignment probes, declared to the
+	// platform in ClientHello.
+	ProbeBudgetPerMinute int
 	// AutoUpdate lets the agent replace its own binary when the platform offers
 	// a newer signed release. Off by default so a build can never be talked
 	// into updating itself unless the install opted in; the systemd installer
@@ -51,6 +59,7 @@ type fileConfig struct {
 	ConnectionClass    *string `json:"connection_class"`
 	LogLevel           *string `json:"log_level"`
 	MaxConcurrentTasks *int    `json:"max_concurrent_tasks"`
+	ProbeBudget        *int    `json:"probe_budget_per_minute"`
 	AutoUpdate         *bool   `json:"auto_update"`
 }
 
@@ -62,8 +71,9 @@ func loadConfig() (Config, error) {
 	cfg := Config{
 		KeyFile:            defaultKeyFile,
 		ConnectionClass:    "vps",
-		LogLevel:           "info",
-		MaxConcurrentTasks: defaultMaxConcurrentTasks,
+		LogLevel:             "info",
+		MaxConcurrentTasks:   defaultMaxConcurrentTasks,
+		ProbeBudgetPerMinute: defaultProbeBudgetPerMinute,
 	}
 
 	if path := configPath(); path != "" {
@@ -85,6 +95,9 @@ func loadConfig() (Config, error) {
 	}
 	if cfg.MaxConcurrentTasks < 1 {
 		return Config{}, fmt.Errorf("max_concurrent_tasks must be at least 1")
+	}
+	if cfg.ProbeBudgetPerMinute < 1 {
+		return Config{}, fmt.Errorf("probe_budget_per_minute must be at least 1")
 	}
 	return cfg, nil
 }
@@ -134,6 +147,9 @@ func applyConfigFile(cfg *Config, path string) error {
 	if fc.MaxConcurrentTasks != nil {
 		cfg.MaxConcurrentTasks = *fc.MaxConcurrentTasks
 	}
+	if fc.ProbeBudget != nil {
+		cfg.ProbeBudgetPerMinute = *fc.ProbeBudget
+	}
 	if fc.AutoUpdate != nil {
 		cfg.AutoUpdate = *fc.AutoUpdate
 	}
@@ -154,6 +170,11 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("MESHCHECK_AGENT_MAX_CONCURRENT_TASKS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.MaxConcurrentTasks = n
+		}
+	}
+	if v := os.Getenv("MESHCHECK_AGENT_PROBE_BUDGET_PER_MINUTE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.ProbeBudgetPerMinute = n
 		}
 	}
 	if v := os.Getenv("MESHCHECK_AGENT_AUTO_UPDATE"); v != "" {
